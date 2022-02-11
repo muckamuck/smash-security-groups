@@ -17,12 +17,14 @@ logger.setLevel(logging.INFO)
 ec2_client = boto3.client('ec2')
 
 
-def smash(groups):
+def remove_rules(group):
     '''
     revoke_security_group_egress
     revoke_security_group_egress
             SecurityGroupRuleIds=[sg_id]
     '''
+    egress_rules = []
+    ingress_rules = []
     try:
         first = 'd14aec63'
         next_token = first
@@ -32,7 +34,7 @@ def smash(groups):
                     Filters=[
                         {
                             'Name': 'group-id',
-                            'Values': groups
+                            'Values': [group]
                         }
                     ]
                 )
@@ -42,12 +44,39 @@ def smash(groups):
                     Filters=[
                         {
                             'Name': 'group-id',
-                            'Values': groups
+                            'Values': [group]
                         }
                     ]
                 )
             next_token = response.get('NextToken')
-            print(json.dumps(response, indent=2))
+            for rule in response.get('SecurityGroupRules', []):
+                rule_id = rule.get('SecurityGroupRuleId')
+                if rule.get('IsEgress'):
+                    egress_rules.append(rule_id)
+                else:
+                    ingress_rules.append(rule_id)
+
+        if len(egress_rules) > 0:
+            logger.debug(json.dumps(egress_rules, indent=2))
+            response = ec2_client.revoke_security_group_egress(
+                GroupId=group,
+                SecurityGroupRuleIds=egress_rules,
+                DryRun=False
+            )
+            logger.info('revoke_security_group_egress() returned %s', json.dumps(response, indent=2))
+        else:
+            logger.info('%s had no egress rules', group)
+
+        if len(ingress_rules) > 0:
+            logger.debug(json.dumps(ingress_rules, indent=2))
+            response = ec2_client.revoke_security_group_ingress(
+                GroupId=group,
+                SecurityGroupRuleIds=ingress_rules,
+                DryRun=False
+            )
+            logger.info('revoke_security_group_ingress() returned %s', json.dumps(response, indent=2))
+        else:
+            logger.info('%s had no ingress rules', group)
     except Exception as wtf:
         logger.error(wtf, exc_info=True)
 
@@ -57,8 +86,11 @@ def smash(groups):
 def do_voo_doo():
     try:
         groups = sys.argv[1:]
-        if len(groups) > 0:
-            smash(groups)
+        for group in groups:
+            remove_rules(group)
+        for group in groups:
+            response = ec2_client.delete_security_group(GroupId=group)
+            logger.info('delete_security_group() returned %s', json.dumps(response, indent=2))
     except Exception as wtf:
         logger.error(wtf, exc_info=True)
 
